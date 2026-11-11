@@ -340,18 +340,23 @@ function save() {
                 log_updated('Reminder', $data["title"], $this->login_user->id);
             }
 
-            //if the google calendar is integrated, add/modify the event
-            if ($type !== "reminder" && get_setting("enable_google_calendar_api") && get_setting('user_' . $this->login_user->id . '_integrate_with_google_calendar') && (get_setting("google_calendar_authorized") || get_setting('user_' . $this->login_user->id . '_google_calendar_authorized'))) {
-                $this->Google_calendar_events->save_event($this->login_user->id, $save_id);
-            }
-
             save_custom_fields("events", $save_id, $this->login_user->is_admin, $this->login_user->user_type);
 
+            //return response first so the UI does not wait for google sync / notification emails
             if ($type === "reminder") {
                 $success_data = $this->_make_reminder_row($new_event_info);
-                echo json_encode(array("success" => true, "id" => $save_id, "data" => $success_data, 'message' => app_lang('record_saved'), "reminder_info" => $new_event_info));
+                echo_json_response(array("success" => true, "id" => $save_id, "data" => $success_data, 'message' => app_lang('record_saved'), "reminder_info" => $new_event_info));
             } else {
-                echo json_encode(array("success" => true, 'message' => app_lang('record_saved')));
+                echo_json_response(array("success" => true, 'message' => app_lang('record_saved')));
+            }
+
+            //if the google calendar is integrated, add/modify the event
+            if ($type !== "reminder" && get_setting("enable_google_calendar_api") && get_setting('user_' . $this->login_user->id . '_integrate_with_google_calendar') && (get_setting("google_calendar_authorized") || get_setting('user_' . $this->login_user->id . '_google_calendar_authorized'))) {
+                try {
+                    $this->Google_calendar_events->save_event($this->login_user->id, $save_id);
+                } catch (\Throwable $ex) {
+                    log_message('error', '[ERROR] {exception}', ['exception' => $ex]);
+                }
             }
 
             if ($share_with) {

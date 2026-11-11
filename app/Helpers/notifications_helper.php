@@ -776,7 +776,9 @@ if (!function_exists('send_notification_emails')) {
                 $template_name = "estimate_request_received";
 
                 $estimate_request_info = $ci->Estimate_requests_model->get_one($notification->estimate_request_id);
-                $primary_contact = $ci->Clients_model->get_primary_contact($estimate_request_info->client_id, true);
+                $primary_contact = ($estimate_request_info && $estimate_request_info->client_id)
+                    ? $ci->Clients_model->get_primary_contact($estimate_request_info->client_id, true)
+                    : null;
 
                 $parser_data["CONTACT_FIRST_NAME"] = isset($primary_contact->first_name) ? $primary_contact->first_name : "";
                 $parser_data["CONTACT_LAST_NAME"] = isset($primary_contact->last_name) ? $primary_contact->last_name : "";
@@ -931,13 +933,18 @@ if (!function_exists('send_notification_emails')) {
             }
 
             $task_info = $ci->Tasks_model->get_details(array("id" => $notification->task_id))->getRow();
-            $context_label = $task_info->context;
+            if (!$task_info || !isset($task_info->id) || !$task_info->id) {
+                //get_details() skips deleted tasks, but the task deleted notifications are sent after deleting the task
+                $task_info = $ci->Tasks_model->get_one($notification->task_id);
+            }
+
+            $context_label = $task_info && isset($task_info->context) ? $task_info->context : "";
             $context_tilte = "";
 
             if ($context_label == "project" || $context_label == "contract" || $context_label == "subscription" || $context_label == "expense" || $context_label == "ticket") {
-                $context_tilte = $task_info->{$task_info->context . "_title"};
+                $context_tilte = $task_info->{$task_info->context . "_title"} ?? ($context_label == "project" ? $notification->project_title : "");
             } else if ($context_label == "invoice") {
-                $context_tilte = $task_info->invoice_display_id;
+                $context_tilte = $task_info->invoice_display_id ?? "";
             } else if ($context_label == "estimate") {
                 $context_tilte = get_estimate_id($task_info->{$task_info->context . "_id"});
             } else if ($context_label == "order") {
@@ -945,10 +952,10 @@ if (!function_exists('send_notification_emails')) {
             } else if ($context_label == "proposal") {
                 $context_tilte = get_proposal_id($task_info->{$task_info->context . "_id"});
             } else if ($context_label == "client" || $context_label == "lead") {
-                $context_tilte = $task_info->company_name;
+                $context_tilte = $task_info->company_name ?? "";
             }
 
-            $parser_data["CONTEXT_LABEL"] = app_lang($context_label);
+            $parser_data["CONTEXT_LABEL"] = $context_label ? app_lang($context_label) : "";
             $parser_data["CONTEXT_TITLE"] = $context_tilte;
 
             $parser_data["TASK_ID"] = $notification->task_id;
@@ -1042,7 +1049,7 @@ if (!function_exists('send_notification_emails')) {
                 $subject = $parser->setData($parser_data)->renderString($subject);
 
                 if ($user_email_address) {
-                    send_app_mail($user_email_address, $subject, $message, $email_options);
+                    send_notification_email_safely($user_email_address, $subject, $message, $email_options);
                 }
             }
         } else {
@@ -1095,7 +1102,7 @@ if (!function_exists('send_notification_emails')) {
                     $parser_data["LOGO_URL"] = get_logo_url();
                     $parser_data["EVENT_TITLE"] = $notification->user_name . " " . sprintf(app_lang("notification_" . $notification->event), $notification->to_user_name);
 
-                    send_app_mail($user_email_address, $subject, $message, $email_options);
+                    send_notification_email_safely($user_email_address, $subject, $message, $email_options);
                 }
             } else if ($email_notify_to) { //keep previous method
                 try {
@@ -1117,7 +1124,7 @@ if (!function_exists('send_notification_emails')) {
 
                 $email_notify_to_array = explode(",", $email_notify_to);
                 foreach ($email_notify_to_array as $email_address) {
-                    send_app_mail($email_address, $subject, $message, $email_options);
+                    send_notification_email_safely($email_address, $subject, $message, $email_options);
                 }
             }
         }
@@ -1125,6 +1132,22 @@ if (!function_exists('send_notification_emails')) {
         // delete the temp attachment
         if ($attachement_url && file_exists($attachement_url)) {
             unlink($attachement_url);
+        }
+    }
+}
+
+/*
+ * Send a notification email without letting one failed recipient stop the others.
+ * send_app_mail() throws on failure in non-production environments.
+ */
+if (!function_exists('send_notification_email_safely')) {
+
+    function send_notification_email_safely($to, $subject, $message, $email_options = array()) {
+        try {
+            return send_app_mail($to, $subject, $message, $email_options);
+        } catch (\Throwable $ex) {
+            log_message('error', '[ERROR] {exception}', ['exception' => $ex]);
+            return false;
         }
     }
 }

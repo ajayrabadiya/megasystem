@@ -1070,6 +1070,42 @@ if (!function_exists('get_team_members_and_teams_select2_data_list')) {
 
 
 /**
+ * Send JSON to the browser immediately, then allow the request to continue
+ * (e.g. send notifications) without keeping the UI spinner stuck.
+ */
+if (!function_exists('echo_json_response')) {
+
+    function echo_json_response($data) {
+        $json = json_encode($data);
+
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+        }
+
+        //required for apache/mod_php so the browser can finish the request before notifications run
+        if (!headers_sent()) {
+            header('Content-Type: application/json; charset=UTF-8');
+            header('Content-Length: ' . strlen($json));
+            header('Connection: close');
+        }
+
+        while (ob_get_level() > 0) {
+            @ob_end_clean();
+        }
+
+        echo $json;
+
+        if (function_exists('fastcgi_finish_request')) {
+            @fastcgi_finish_request();
+        } else {
+            ignore_user_abort(true);
+            @ob_flush();
+            @flush();
+        }
+    }
+}
+
+/**
  * submit data for notification
  * 
  * @return array

@@ -1253,13 +1253,7 @@ class Tasks extends Security_Controller {
 
             $new_activity_log_id = save_custom_fields("tasks", $save_id, $this->login_user->is_admin, $this->login_user->user_type, $activity_log_id);
 
-            if ($id) {
-                //updated
-                $this->_send_task_updated_notification($task_info, ($new_activity_log_id ? $new_activity_log_id : $activity_log_id));
-            } else {
-                $task_info = $this->Tasks_model->get_one($save_id);
-                $this->_send_task_created_notification($task_info);
-
+            if (!$id) {
                 //save uploaded files as comment
                 $target_path = get_setting("timeline_file_path");
                 $files_data = move_files_from_temp_dir_to_permanent_dir($target_path, "project_comment");
@@ -1280,7 +1274,16 @@ class Tasks extends Security_Controller {
                 }
             }
 
-            echo json_encode(array("success" => true, "data" => $this->_row_data($save_id), 'id' => $save_id, 'message' => app_lang('record_saved'), "add_type" => $add_type));
+            //return response first so the UI does not wait for notification emails
+            echo_json_response(array("success" => true, "data" => $this->_row_data($save_id), 'id' => $save_id, 'message' => app_lang('record_saved'), "add_type" => $add_type));
+
+            if ($id) {
+                //updated
+                $this->_send_task_updated_notification($task_info, ($new_activity_log_id ? $new_activity_log_id : $activity_log_id));
+            } else {
+                $task_info = $this->Tasks_model->get_one($save_id);
+                $this->_send_task_created_notification($task_info);
+            }
         } else {
             echo json_encode(array("success" => false, 'message' => app_lang('error_occurred')));
         }

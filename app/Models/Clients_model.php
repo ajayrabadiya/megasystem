@@ -325,11 +325,15 @@ $invoice_join = "
         $users_table = $this->db->prefixTable('users');
         $client_id = $this->_get_clean_value($client_id);
 
+        if (!$client_id) {
+            return $info ? null : false;
+        }
+
         $sql = "SELECT $users_table.id, $users_table.first_name, $users_table.last_name
         FROM $users_table
         WHERE $users_table.deleted=0 AND $users_table.client_id=$client_id AND $users_table.is_primary_contact=1";
         $result = $this->db->query($sql);
-        if ($result->resultID->num_rows) {
+        if ($result && $result->resultID->num_rows) {
             if ($info) {
                 return $result->getRow();
             } else {

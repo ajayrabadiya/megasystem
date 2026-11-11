@@ -222,7 +222,7 @@ class Notification_processor extends App_Controller {
                             $event = "general_task_finished";
                             $options["activity_log_id"] = ""; //remove activity log id
                         } else {
-                            $event = "project_task_updated";
+                            $event = "general_task_updated";
                         }
                     }
                 }

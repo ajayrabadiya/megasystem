@@ -178,7 +178,7 @@ class Notifications_model extends Crud_model {
 
         //find estimate request assignee
         if (in_array("estimate_request_assignee", $notify_to_terms) && $estimate_request_id) {
-            $where .= " OR ($users_table.id=(SELECT $estimate_request_id.assigned_to FROM $estimate_request_id WHERE $estimate_request_table.id=$estimate_request_id)) ";
+            $where .= " OR ($users_table.id=(SELECT $estimate_request_table.assigned_to FROM $estimate_request_table WHERE $estimate_request_table.id=$estimate_request_id)) ";
         }
 
 
@@ -479,34 +479,37 @@ class Notifications_model extends Crud_model {
         if ($notify_to->resultID->num_rows) {
             foreach ($notify_to->getResult() as $user) {
 
+                //users explicitly selected in notification settings must always receive the notification
+                $is_selected_notify_user = $this->user_is_selected_in_notification_settings($user, $notification_settings);
 
                 //check ticket type permission for team mebers before preparing the notifcation 
-                if ($ticket_info && !$this->notify_to_this_user_for_this_ticket($ticket_info, $user)) {
+                if (!$is_selected_notify_user && $ticket_info && !$this->notify_to_this_user_for_this_ticket($ticket_info, $user)) {
                     continue; //skip next lines for this loop
                 }
 
                 //check task permission for team mebers before preparing the notifcation 
-                if ($task_info && !$this->notify_to_this_user_for_this_task($task_info, $user)) {
+                if (!$is_selected_notify_user && $task_info && !$this->notify_to_this_user_for_this_task($task_info, $user)) {
                     continue; //skip next lines for this loop
                 }
 
                 //check project permission for team mebers before preparing the notifcation 
-                if ($project_info && !$this->notify_to_this_user_for_this_project($project_info, $user)) {
+                //this was blocking project_created emails for selected team members who are not project members yet
+                if (!$is_selected_notify_user && $project_info && !$this->notify_to_this_user_for_this_project($project_info, $user)) {
                     continue; //skip next lines for this loop
                 }
 
                 //check estimate permission for team mebers before preparing the notifcation 
-                if ($estimate_info && !$this->notify_to_this_user_for_this_estimate($estimate_info, $user)) {
+                if (!$is_selected_notify_user && $estimate_info && !$this->notify_to_this_user_for_this_estimate($estimate_info, $user)) {
                     continue; //skip next lines for this loop
                 }
 
                 //check post permission for team mebers before preparing the notifcation 
-                if ($post_info && !$this->notify_to_this_user_for_this_post($post_info, $user)) {
+                if (!$is_selected_notify_user && $post_info && !$this->notify_to_this_user_for_this_post($post_info, $user)) {
                     continue; //skip next lines for this loop
                 }
 
                 //check client/lead permission for team mebers before preparing the notifcation 
-                if ($client_info && !$this->notify_to_this_user_for_this_client($client_info, $user)) {
+                if (!$is_selected_notify_user && $client_info && !$this->notify_to_this_user_for_this_client($client_info, $user)) {
                     continue; //skip next lines for this loop
                 }
 
@@ -629,27 +632,40 @@ class Notifications_model extends Crud_model {
 
         $creator_user_info = $this->_get_notification_creator_user($user_id);
 
+        //each channel is isolated, so a failure in one (e.g. smtp error) won't block the others
         //notification saved. send emails
         if ($notification_id && $email_notify_to) {
-            send_notification_emails($notification_id, $email_notify_to, $extra_data);
+            try {
+                send_notification_emails($notification_id, $email_notify_to, $extra_data);
+            } catch (\Throwable $ex) {
+                log_message('error', '[ERROR] {exception}', ['exception' => $ex]);
+            }
         }
 
         //send push notifications
         if ($web_notify_to && get_setting("enable_push_notification")) {
             //send push notifications to all web notifiy to users
             //but in receiving portal, it will be checked if the user disable push notification or not
-            $notification_data = (object) $data;
-            $notification_data->notification_id = $notification_id;
-            if ($notification_data->to_user_id) {
-                $notification_data->to_user_name = $this->get_to_user_name($notification_id);
-            }
-            $notification_data->creator_user_info = $creator_user_info;
+            try {
+                $notification_data = (object) $data;
+                $notification_data->notification_id = $notification_id;
+                if ($notification_data->to_user_id) {
+                    $notification_data->to_user_name = $this->get_to_user_name($notification_id);
+                }
+                $notification_data->creator_user_info = $creator_user_info;
 
-            send_push_notifications($event, $web_notify_to, $notification_data);
+                send_push_notifications($event, $web_notify_to, $notification_data);
+            } catch (\Throwable $ex) {
+                log_message('error', '[ERROR] {exception}', ['exception' => $ex]);
+            }
         }
 
         //send slack notifications
-        $this->prepare_sending_slack_notification($event, $user_id, $notification_id, $notification_settings, $project_id);
+        try {
+            $this->prepare_sending_slack_notification($event, $user_id, $notification_id, $notification_settings, $project_id);
+        } catch (\Throwable $ex) {
+            log_message('error', '[ERROR] {exception}', ['exception' => $ex]);
+        }
 
         //send data to plugin hook
         app_hooks()->do_action('app_hook_post_notification', $notification_id);
@@ -744,6 +760,34 @@ class Notifications_model extends Crud_model {
                 send_slack_notification($event, $user_id, $notification_id, $this->Project_settings_model->get_setting($project_id, "project_slack_webhook_url"));
             }
         }
+    }
+
+    //check if this user was explicitly selected in notification settings (team members / team)
+    private function user_is_selected_in_notification_settings($user, $notification_settings) {
+        if (!$user || !$notification_settings) {
+            return false;
+        }
+
+        if ($notification_settings->notify_to_team_members) {
+            $member_ids = explode(",", $notification_settings->notify_to_team_members);
+            if (in_array($user->id, $member_ids) || in_array((string) $user->id, $member_ids)) {
+                return true;
+            }
+        }
+
+        if ($notification_settings->notify_to_team) {
+            $team_table = $this->db->prefixTable('team');
+            $team_ids = $this->_get_clean_value($notification_settings->notify_to_team);
+            $user_id = $this->_get_clean_value($user->id);
+            if ($team_ids && $user_id) {
+                $team_user = $this->db->query("SELECT $team_table.id FROM $team_table WHERE $team_table.deleted=0 AND FIND_IN_SET($team_table.id, '$team_ids') AND FIND_IN_SET('$user_id', $team_table.members) LIMIT 1")->getRow();
+                if ($team_user) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     //if the ticket has been assigend to a team member, then only the assignee will get notificaiton
