@@ -342,32 +342,37 @@ function save() {
 
             save_custom_fields("events", $save_id, $this->login_user->is_admin, $this->login_user->user_type);
 
-            //return response first so the UI does not wait for google sync / notification emails
             if ($type === "reminder") {
                 $success_data = $this->_make_reminder_row($new_event_info);
-                echo_json_response(array("success" => true, "id" => $save_id, "data" => $success_data, 'message' => app_lang('record_saved'), "reminder_info" => $new_event_info));
+                $response = array("success" => true, "id" => $save_id, "data" => $success_data, 'message' => app_lang('record_saved'), "reminder_info" => $new_event_info);
             } else {
-                echo_json_response(array("success" => true, 'message' => app_lang('record_saved')));
+                $response = array("success" => true, 'message' => app_lang('record_saved'));
             }
 
-            //if the google calendar is integrated, add/modify the event
-            if ($type !== "reminder" && get_setting("enable_google_calendar_api") && get_setting('user_' . $this->login_user->id . '_integrate_with_google_calendar') && (get_setting("google_calendar_authorized") || get_setting('user_' . $this->login_user->id . '_google_calendar_authorized'))) {
-                try {
-                    $this->Google_calendar_events->save_event($this->login_user->id, $save_id);
-                } catch (\Throwable $ex) {
-                    log_message('error', '[ERROR] {exception}', ['exception' => $ex]);
+            //Respond immediately; notifications are async. Google sync only when request can finish first (PHP-FPM).
+            $login_user_id = $this->login_user->id;
+            echo_json_response_with_background($response, function () use ($type, $save_id, $share_with, $id, $login_user_id) {
+                if ($share_with) {
+                    if ($id) {
+                        log_notification("calendar_event_modified", array("event_id" => $save_id));
+                    } else {
+                        log_notification("new_event_added_in_calendar", array("event_id" => $save_id));
+                    }
                 }
-            }
 
-            if ($share_with) {
-                if ($id) {
-                    //the event modified and shared with others, log the notificaiton
-                    log_notification("calendar_event_modified", array("event_id" => $save_id));
-                } else {
-                    //new event added and shared with others, log the notificaiton
-                    log_notification("new_event_added_in_calendar", array("event_id" => $save_id));
+                //Avoid blocking WAMP/mod_php Save on Google API latency
+                if (!function_exists('fastcgi_finish_request')) {
+                    return;
                 }
-            }
+
+                if ($type !== "reminder" && get_setting("enable_google_calendar_api") && get_setting('user_' . $login_user_id . '_integrate_with_google_calendar') && (get_setting("google_calendar_authorized") || get_setting('user_' . $login_user_id . '_google_calendar_authorized'))) {
+                    try {
+                        $this->Google_calendar_events->save_event($login_user_id, $save_id);
+                    } catch (\Throwable $ex) {
+                        log_message('error', '[ERROR] {exception}', ['exception' => $ex]);
+                    }
+                }
+            });
         } else {
             echo json_encode(array("success" => false, 'message' => app_lang('error_occurred')));
         }

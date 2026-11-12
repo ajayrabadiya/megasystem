@@ -24,11 +24,14 @@ class Notification_processor extends App_Controller {
 
     function create_notification($data = array()) {
 
-        ini_set('max_execution_time', 300); //300 seconds 
+        ini_set('max_execution_time', 300); //300 seconds
+        ignore_user_abort(true);
 
         //validate notification request
-
-        if (!get_setting("log_direct_notifications")) {
+        //Always accept POST from async dispatcher (WAMP uses a detached curl process).
+        //Previously log_direct_notifications=1 ignored $_POST and required inline calls,
+        //which blocked Apache workers and froze tab loading / Save.
+        if (empty($data)) {
             $data = $_POST;
         }
 
@@ -38,7 +41,6 @@ class Notification_processor extends App_Controller {
             $event = decode_id($raw_event, "notification");
         }
 
-
         if (!$event) {
             die("Access Denied!");
         }
@@ -47,6 +49,20 @@ class Notification_processor extends App_Controller {
 
         if (!is_array($notification_data)) {
             die("Access Denied!!");
+        }
+
+        //Acknowledge quickly so the detached curl client can exit (web requests only)
+        if (PHP_SAPI !== 'cli' && !headers_sent()) {
+            header('Content-Type: text/plain; charset=UTF-8');
+            header('Connection: close');
+            header('Content-Length: 2');
+            echo 'OK';
+            if (function_exists('fastcgi_finish_request')) {
+                @fastcgi_finish_request();
+            } else {
+                @ob_flush();
+                @flush();
+            }
         }
 
         $user_id = get_array_value($data, "user_id");

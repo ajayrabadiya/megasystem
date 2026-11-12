@@ -676,6 +676,15 @@ class Tasks extends Security_Controller {
         return get_setting("remove_task_statuses");
     }
 
+    private function _get_all_team_members_for_task_dropdown() {
+        $options = array("status" => "active", "user_type" => "staff");
+        if (get_array_value($this->login_user->permissions, "hide_team_members_list_from_dropdowns") == "1") {
+            $options["id"] = $this->login_user->id;
+        }
+
+        return $this->Users_model->get_id_and_text_dropdown(array("first_name", "last_name"), $options);
+    }
+
     private function _get_task_related_dropdowns($context = "", $context_id = 0, $return_empty_context = false) {
 
         //get milestone dropdown
@@ -690,7 +699,7 @@ class Tasks extends Security_Controller {
         $assign_to_dropdown = array(array("id" => "", "text" => "-"));
         $collaborators_dropdown = array();
 
-        //get project members and collaborators dropdown
+        //get project members for assign-to, and all team members for collaborators
         if ($context == "project" && $context_id) {
             $show_client_contacts = $this->can_access_clients(true);
             if ($this->login_user->user_type === "client" && get_setting("client_can_assign_tasks")) {
@@ -706,18 +715,20 @@ class Tasks extends Security_Controller {
         } else if ($context == "project") {
             $project_members = array();
         } else {
-
-            $options = array("status" => "active", "user_type" => "staff");
-            if (get_array_value($this->login_user->permissions, "hide_team_members_list_from_dropdowns") == "1") {
-                $options["id"] = $this->login_user->id;
-            }
-
-            $project_members = $this->Users_model->get_id_and_text_dropdown(array("first_name", "last_name"), $options);
+            $project_members = $this->_get_all_team_members_for_task_dropdown();
         }
 
         if ($project_members) {
             $assign_to_dropdown = array_merge($assign_to_dropdown, $project_members);
-            $collaborators_dropdown = array_merge($collaborators_dropdown, $project_members);
+        }
+
+        //Collaborators should list all active team members (multiple select),
+        //not only current project members — projects often have a single leader.
+        if ($context == "project" && $this->login_user->user_type === "client") {
+            //clients keep project-member based collaborators (may include contacts)
+            $collaborators_dropdown = $project_members ? $project_members : array();
+        } else {
+            $collaborators_dropdown = $this->_get_all_team_members_for_task_dropdown();
         }
 
         //get labels suggestion
@@ -1274,16 +1285,22 @@ class Tasks extends Security_Controller {
                 }
             }
 
-            //return response first so the UI does not wait for notification emails
-            echo_json_response(array("success" => true, "data" => $this->_row_data($save_id), 'id' => $save_id, 'message' => app_lang('record_saved'), "add_type" => $add_type));
+            //on PHP-FPM: respond first; on WAMP/mod_php: notify then respond (avoids stuck Save spinner)
+            $notification_task_info = isset($task_info) ? $task_info : null;
+            $notification_activity_log_id = $new_activity_log_id ? $new_activity_log_id : $activity_log_id;
+            $is_update = $id ? true : false;
 
-            if ($id) {
-                //updated
-                $this->_send_task_updated_notification($task_info, ($new_activity_log_id ? $new_activity_log_id : $activity_log_id));
-            } else {
-                $task_info = $this->Tasks_model->get_one($save_id);
-                $this->_send_task_created_notification($task_info);
-            }
+            echo_json_response_with_background(
+                array("success" => true, "data" => $this->_row_data($save_id), 'id' => $save_id, 'message' => app_lang('record_saved'), "add_type" => $add_type),
+                function () use ($is_update, $notification_task_info, $notification_activity_log_id, $save_id) {
+                    if ($is_update && $notification_task_info) {
+                        $this->_send_task_updated_notification($notification_task_info, $notification_activity_log_id);
+                    } else if (!$is_update) {
+                        $created_task_info = $this->Tasks_model->get_one($save_id);
+                        $this->_send_task_created_notification($created_task_info);
+                    }
+                }
+            );
         } else {
             echo json_encode(array("success" => false, 'message' => app_lang('error_occurred')));
         }

@@ -395,16 +395,19 @@ class Projects extends Security_Controller {
                 }
             }
 
-            //return response first so the UI does not wait for notification emails
-            echo_json_response(array("success" => true, "data" => $this->_row_data($save_id), 'id' => $save_id, 'message' => app_lang('record_saved')));
+            //on PHP-FPM: respond first; on WAMP/mod_php: notify then respond (avoids stuck Save spinner)
+            echo_json_response_with_background(
+                array("success" => true, "data" => $this->_row_data($save_id), 'id' => $save_id, 'message' => app_lang('record_saved')),
+                function () use ($status_id, $save_id, $id) {
+                    if ($status_id == 2) {
+                        log_notification("project_completed", array("project_id" => $save_id));
+                    }
 
-            if ($status_id == 2) {
-                log_notification("project_completed", array("project_id" => $save_id));
-            }
-
-            if (!$id) {
-                log_notification("project_created", array("project_id" => $save_id));
-            }
+                    if (!$id) {
+                        log_notification("project_created", array("project_id" => $save_id));
+                    }
+                }
+            );
         } else {
             echo json_encode(array("success" => false, 'message' => app_lang('error_occurred')));
         }

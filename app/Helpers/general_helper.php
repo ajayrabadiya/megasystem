@@ -92,7 +92,7 @@ if (!function_exists('get_avatar')) {
 if (!function_exists('load_css')) {
 
     function load_css(array $array) {
-        $version = get_setting("app_version");
+        $version = get_setting("app_version") . ".fix1";
 
         foreach ($array as $uri) {
             echo "<link rel='stylesheet' type='text/css' href='" . base_url($uri) . "?v=$version' />";
@@ -110,7 +110,7 @@ if (!function_exists('load_css')) {
 if (!function_exists('load_js')) {
 
     function load_js(array $array) {
-        $version = get_setting("app_version");
+        $version = get_setting("app_version") . ".fix1";
 
         foreach ($array as $uri) {
             echo "<script type='text/javascript'  src='" . base_url($uri) . "?v=$version'></script>";
@@ -1072,6 +1072,10 @@ if (!function_exists('get_team_members_and_teams_select2_data_list')) {
 /**
  * Send JSON to the browser immediately, then allow the request to continue
  * (e.g. send notifications) without keeping the UI spinner stuck.
+ *
+ * Returns true when the HTTP response is fully finished and heavy work can continue.
+ * On Apache/mod_php (no fastcgi_finish_request), returns false — the caller must
+ * NOT do heavy work after this, or the modal spinner will hang until that work ends.
  */
 if (!function_exists('echo_json_response')) {
 
@@ -1097,11 +1101,81 @@ if (!function_exists('echo_json_response')) {
 
         if (function_exists('fastcgi_finish_request')) {
             @fastcgi_finish_request();
-        } else {
-            ignore_user_abort(true);
-            @ob_flush();
-            @flush();
+            return true;
         }
+
+        ignore_user_abort(true);
+        @ob_flush();
+        @flush();
+
+        //flush alone does not end the request on mod_php/WAMP
+        return false;
+    }
+}
+
+/**
+ * Return JSON for AJAX forms immediately.
+ * Background work (notifications) must be non-blocking — see log_notification().
+ */
+if (!function_exists('echo_json_response_with_background')) {
+
+    function echo_json_response_with_background($data, $after_response = null) {
+        //Respond first so Save tick / modal close / tab navigation never wait on emails
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+        }
+
+        if (function_exists('fastcgi_finish_request')) {
+            echo_json_response($data);
+        } else {
+            if (!headers_sent()) {
+                header('Content-Type: application/json; charset=UTF-8');
+            }
+            echo json_encode($data);
+        }
+
+        if (!is_callable($after_response)) {
+            return;
+        }
+
+        try {
+            $after_response();
+        } catch (\Throwable $ex) {
+            log_message('error', '[ERROR] {exception}', ['exception' => $ex]);
+        }
+    }
+}
+
+/**
+ * Fire an HTTP POST in a separate OS process so Save/UI is not blocked.
+ */
+if (!function_exists('dispatch_async_http_post')) {
+
+    function dispatch_async_http_post($url, $post_body) {
+        if (!$url || $post_body === null) {
+            return false;
+        }
+
+        $is_windows = strtoupper(substr(PHP_OS, 0, 3)) === 'WIN';
+
+        if ($is_windows) {
+            $curl = 'C:\\Windows\\System32\\curl.exe';
+            if (!is_file($curl)) {
+                $curl = 'curl.exe';
+            }
+
+            //max-time 2: deliver POST then disconnect; processor keeps running
+            $cmd = 'start /B "" ' . escapeshellarg($curl)
+                . ' --silent --max-time 2 -X POST ' . escapeshellarg($url)
+                . ' --data ' . escapeshellarg($post_body);
+            pclose(popen($cmd, 'r'));
+            return true;
+        }
+
+        $cmd = 'curl --silent --max-time 2 -X POST ' . escapeshellarg($url)
+            . ' --data ' . escapeshellarg($post_body) . ' > /dev/null 2>&1 &';
+        @exec($cmd);
+        return true;
     }
 }
 
@@ -1115,73 +1189,33 @@ if (!function_exists('log_notification')) {
     function log_notification($event, $options = array(), $user_id = 0) {
         $ci = new Security_Controller(false);
 
-        //send response to notification processor
-        if (get_setting("log_direct_notifications")) {
-            //send direct notification to the url
-            $data = array(
-                "event" => encode_id($event, "notification")
-            );
+        $payload = array(
+            "event" => encode_id($event, "notification")
+        );
 
-            if ($user_id) {
-                $data["user_id"] = $user_id;
-            } else if ($user_id === "0") {
-                $data["user_id"] = $user_id; //if user id is 0 (string) we'll assume that it's system bot 
-            } else if (isset($ci->login_user->id)) {
-                $data["user_id"] = $ci->login_user->id;
-            }
-
-            foreach ($options as $key => $value) {
-                if ($value) {
-                    $value = urlencode($value);
-                }
-                $data[$key] = $value;
-            }
-
-            $notification_processor = new Notification_processor();
-            $notification_processor->create_notification($data);
-        } else {
-            //use curl to send request
-            $url = get_uri("notification_processor/create_notification");
-
-            $req = "event=" . encode_id($event, "notification");
-
-            if ($user_id) {
-                $req .= "&user_id=" . $user_id;
-            } else if ($user_id === "0") {
-                $req .= "&user_id=" . $user_id; //if user id is 0 (string) we'll assume that it's system bot 
-            } else if (isset($ci->login_user->id)) {
-                $req .= "&user_id=" . $ci->login_user->id;
-            }
-
-
-            foreach ($options as $key => $value) {
-                if ($value) {
-                    $value = urlencode($value);
-                }
-
-                $req .= "&$key=$value";
-            }
-
-
-            $ch = curl_init();
-            curl_setopt($ch, CURLOPT_HEADER, 0);
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-            curl_setopt($ch, CURLOPT_URL, $url);
-            curl_setopt($ch, CURLOPT_POST, 1);
-            curl_setopt($ch, CURLOPT_POSTFIELDS, $req);
-            curl_setopt($ch, CURLOPT_TIMEOUT, 1);
-
-            if (get_setting("add_useragent_to_curl")) {
-                curl_setopt($ch, CURLOPT_USERAGENT, "Mozilla/5.0 (Windows NT 6.1; rv:19.0) Gecko/20100101 Firefox/19.0");
-            }
-
-            curl_exec($ch);
-            if (curl_errno($ch)) {
-                $error_msg = curl_error($ch);
-                log_message('error', 'CURL error on log_notification: ' . $error_msg);
-            }
-            curl_close($ch);
+        if ($user_id) {
+            $payload["user_id"] = $user_id;
+        } else if ($user_id === "0") {
+            $payload["user_id"] = $user_id; //system bot
+        } else if (isset($ci->login_user->id)) {
+            $payload["user_id"] = $ci->login_user->id;
         }
+
+        foreach ($options as $key => $value) {
+            if ($value) {
+                $payload[$key] = $value;
+            }
+        }
+
+        //Detached HTTP with short client timeout: request is accepted, curl exits,
+        //processor continues with ignore_user_abort (see Notification_processor).
+        $url = get_uri("notification_processor/create_notification");
+        $req = http_build_query($payload);
+        if (dispatch_async_http_post($url, $req)) {
+            return;
+        }
+
+        log_message('error', 'log_notification: failed to dispatch async notification for event ' . $event);
     }
 }
 

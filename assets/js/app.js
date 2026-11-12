@@ -660,6 +660,15 @@ var registerAppTableRowDeleteHook = function (tableId, onSuccess, hookType, cont
                             }
 
                             $(form).find('[type="submit"]').removeAttr('disabled');
+                        },
+                        error: function () {
+                            //prevent infinite Save spinner when response is empty/invalid JSON
+                            if (settings.isModal) {
+                                unmaskModal();
+                            }
+                            appLoader.hide();
+                            $(form).find('[type="submit"]').removeAttr('disabled');
+                            appAlert.error(AppLanugage.somethingWentWrong || "Error occurred");
                         }
                     });
                 });
@@ -5866,6 +5875,12 @@ var loadFilterView = function (settings) {
 
     $.fn.appFilters = function (options) {
         appLoader.show();
+
+        //Always clear loader even when this view has no AJAX source/target
+        //Otherwise Projects/Tasks (and other) tabs can stay on the spinner forever.
+        setTimeout(function () {
+            appLoader.hide();
+        }, 0);
 
         var defaults = {
             source: "", //data url
