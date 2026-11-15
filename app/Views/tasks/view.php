@@ -478,6 +478,10 @@ $task_link = anchor(get_uri("tasks/view/$model_info->id"), '<i data-feather="ext
                 }
 
                 appLoader.hide();
+            },
+            error: function() {
+                appLoader.hide();
+                appAlert.error(AppLanugage.somethingWentWrong || "Error occurred");
             }
         });
     }

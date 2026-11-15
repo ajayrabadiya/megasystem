@@ -44,15 +44,16 @@
         window.projectMemberForm = $("#project-member-form").appForm({
             closeModalOnSuccess: false,
             onSuccess: function (result) {
-                if (result.id !== "exists") {
-                    for (i = 0; i < result.data.length; i++) {
+                if (result.id !== "exists" && result.data && result.data.length) {
+                    var ids = $.isArray(result.id) ? result.id : [result.id];
+                    for (var i = 0; i < result.data.length; i++) {
+                        var rowId = (typeof ids[i] !== "undefined") ? ids[i] : ids[0];
 <?php if ($add_user_type == "client_contacts") { ?>
-                            $("#project-client-contacts-table").appTable({newData: result.data[i], dataId: result.id[i]});
+                        $("#project-client-contacts-table").appTable({newData: result.data[i], dataId: rowId});
 <?php } else { ?>
-                            $("#project-member-table").appTable({newData: result.data[i], dataId: result.id[i]});
+                        $("#project-member-table").appTable({newData: result.data[i], dataId: rowId});
 <?php } ?>
                     }
-
                 }
 
                 if (window.showAddMultipleTasksModal) {

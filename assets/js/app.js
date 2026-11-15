@@ -611,51 +611,62 @@ var registerAppTableRowDeleteHook = function (tableId, onSuccess, hookType, cont
 
                         },
                         success: function (result, statusText, xhr, $form) {
-                            settings.onAjaxSuccess(result);
+                            try {
+                                settings.onAjaxSuccess(result);
 
-                            if (result.success) {
-                                settings.onSuccess(result);
-                                if (settings.isModal && settings.closeModalOnSuccess) {
-                                    closeAjaxModal(true);
-                                }
+                                if (result.success) {
+                                    settings.onSuccess(result);
+                                    if (settings.isModal && settings.closeModalOnSuccess) {
+                                        closeAjaxModal(true);
+                                    }
 
-                                if (!settings.isModal) {
-                                    $(form).find("textarea").each(function () {
-                                        if ($(this).attr("data-rich-text-editor") != undefined && $(this).attr("data-keep-rich-text-editor-after-submit") == undefined) {
-                                            destroyWYSIWYGEditor($(this))
-                                        }
-                                    });
-                                }
-
-                                //trigger appFormHooks
-                                if ($form && window.appFormHooks) {
-                                    var formId = $(form).attr('id');
-                                    if (formId && window.appFormHooks[formId]) {
-                                        var formPostData = {};
-                                        $.each($form.serializeArray(), function () {
-                                            formPostData[this.name] = this.value;
-                                        });
-
-                                        window.appFormHooks[formId].forEach(function (hook) {
-                                            if (typeof hook.onSuccess === 'function') {
-                                                hook.onSuccess(formPostData, result);
+                                    if (!settings.isModal) {
+                                        $(form).find("textarea").each(function () {
+                                            if ($(this).attr("data-rich-text-editor") != undefined && $(this).attr("data-keep-rich-text-editor-after-submit") == undefined) {
+                                                destroyWYSIWYGEditor($(this))
                                             }
                                         });
+                                    }
 
+                                    //trigger appFormHooks
+                                    if ($form && window.appFormHooks) {
+                                        var formId = $(form).attr('id');
+                                        if (formId && window.appFormHooks[formId]) {
+                                            var formPostData = {};
+                                            $.each($form.serializeArray(), function () {
+                                                formPostData[this.name] = this.value;
+                                            });
+
+                                            window.appFormHooks[formId].forEach(function (hook) {
+                                                if (typeof hook.onSuccess === 'function') {
+                                                    hook.onSuccess(formPostData, result);
+                                                }
+                                            });
+
+                                        }
+                                    }
+
+                                    appLoader.hide();
+                                } else {
+                                    if (settings.onError(result)) {
+                                        if (settings.isModal) {
+                                            unmaskModal();
+                                            if (result.message) {
+                                                appAlert.error(result.message, { container: '.modal-body', animate: false });
+                                            }
+                                        } else if (result.message) {
+                                            appAlert.error(result.message);
+                                        }
                                     }
                                 }
-
+                            } catch (err) {
+                                //Keep UI usable if onSuccess throws after a successful save
+                                if (settings.isModal) {
+                                    unmaskModal();
+                                }
                                 appLoader.hide();
-                            } else {
-                                if (settings.onError(result)) {
-                                    if (settings.isModal) {
-                                        unmaskModal();
-                                        if (result.message) {
-                                            appAlert.error(result.message, { container: '.modal-body', animate: false });
-                                        }
-                                    } else if (result.message) {
-                                        appAlert.error(result.message);
-                                    }
+                                if (window.console && console.error) {
+                                    console.error(err);
                                 }
                             }
 
@@ -4850,6 +4861,11 @@ deleteHandler = function (e, callback, postData = {}) {
                 appAlert.error(result.message);
             }
             appLoader.hide();
+        },
+        error: function () {
+            //prevent infinite delete spinner when response is empty/invalid JSON
+            appLoader.hide();
+            appAlert.error(AppLanugage.somethingWentWrong || "Error occurred");
         }
     });
 }

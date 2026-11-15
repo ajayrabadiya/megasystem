@@ -1637,32 +1637,36 @@ class Tasks extends Security_Controller {
         }
 
         if ($this->Tasks_model->delete_task_and_sub_items($id)) {
-            echo json_encode(array("success" => true, 'message' => app_lang('record_deleted')));
-
-            $task_info = $this->Tasks_model->get_one($id);
-
-            if ($task_info->context === "project") {
-                log_notification("project_task_deleted", array("project_id" => $task_info->project_id, "task_id" => $id));
-            } else if ($task_info->context === "general") {
-                log_notification("general_task_deleted", array("task_id" =>  $task_info->id));
-            } else {
-                $context_id_key = $task_info->context . "_id";
-                $context_id_value = $task_info->{$task_info->context . "_id"};
-
-                log_notification("general_task_deleted", array("$context_id_key" => $context_id_value, "task_id" => $id));
-            }
+            //Capture details before response; notify/hooks after so spinner can stop
+            $task_info = $info;
             $userID = $this->login_user->id ?? 0;
-            log_deleted('Task', $task_info->title, $userID);
 
-            try {
-                app_hooks()->do_action("app_hook_data_delete", array(
-                    "id" => $id,
-                    "table" => get_db_prefix() . "tasks",
-                    "table_without_prefix" => "tasks",
-                ));
-            } catch (\Exception $ex) {
-                log_message('error', '[ERROR] {exception}', ['exception' => $ex]);
-            }
+            echo_json_response_with_background(
+                array("success" => true, 'message' => app_lang('record_deleted')),
+                function () use ($id, $task_info, $userID) {
+                    if ($task_info->context === "project") {
+                        log_notification("project_task_deleted", array("project_id" => $task_info->project_id, "task_id" => $id));
+                    } else if ($task_info->context === "general") {
+                        log_notification("general_task_deleted", array("task_id" => $task_info->id));
+                    } else {
+                        $context_id_key = $task_info->context . "_id";
+                        $context_id_value = $task_info->{$task_info->context . "_id"};
+
+                        log_notification("general_task_deleted", array("$context_id_key" => $context_id_value, "task_id" => $id));
+                    }
+                    log_deleted('Task', $task_info->title, $userID);
+
+                    try {
+                        app_hooks()->do_action("app_hook_data_delete", array(
+                            "id" => $id,
+                            "table" => get_db_prefix() . "tasks",
+                            "table_without_prefix" => "tasks",
+                        ));
+                    } catch (\Exception $ex) {
+                        log_message('error', '[ERROR] {exception}', ['exception' => $ex]);
+                    }
+                }
+            );
         } else {
             echo json_encode(array("success" => false, 'message' => app_lang('record_cannot_be_deleted')));
         }

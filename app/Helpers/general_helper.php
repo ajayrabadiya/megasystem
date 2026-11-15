@@ -1114,25 +1114,16 @@ if (!function_exists('echo_json_response')) {
 }
 
 /**
- * Return JSON for AJAX forms immediately.
+ * Return JSON for AJAX forms immediately, then run $after_response.
+ * Always uses Content-Length so the browser can finish the XHR on WAMP/mod_php
+ * even if background work continues in the same PHP process.
  * Background work (notifications) must be non-blocking — see log_notification().
  */
 if (!function_exists('echo_json_response_with_background')) {
 
     function echo_json_response_with_background($data, $after_response = null) {
-        //Respond first so Save tick / modal close / tab navigation never wait on emails
-        if (session_status() === PHP_SESSION_ACTIVE) {
-            session_write_close();
-        }
-
-        if (function_exists('fastcgi_finish_request')) {
-            echo_json_response($data);
-        } else {
-            if (!headers_sent()) {
-                header('Content-Type: application/json; charset=UTF-8');
-            }
-            echo json_encode($data);
-        }
+        //Respond first so Save/Delete/modal UI never waits on emails or hooks
+        echo_json_response($data);
 
         if (!is_callable($after_response)) {
             return;

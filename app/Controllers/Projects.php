@@ -757,20 +757,24 @@ class Projects extends Security_Controller {
         $userID = $this->login_user->id ?? 0;
 
         if ($this->Projects_model->delete_project_and_sub_items($id)) {
-            log_notification("project_deleted", array("project_id" => $id));
-            log_deleted('Project', $project_title, $userID);
+            //Respond first so the delete spinner can stop; notify/hooks after
+            echo_json_response_with_background(
+                array("success" => true, 'message' => app_lang('record_deleted')),
+                function () use ($id, $project_title, $userID) {
+                    log_notification("project_deleted", array("project_id" => $id));
+                    log_deleted('Project', $project_title, $userID);
 
-            try {
-                app_hooks()->do_action("app_hook_data_delete", array(
-                    "id" => $id,
-                    "table" => get_db_prefix() . "projects",
-                    "table_without_prefix" => "projects",
-                ));
-            } catch (\Exception $ex) {
-                log_message('error', '[ERROR] {exception}', ['exception' => $ex]);
-            }
-
-            echo json_encode(array("success" => true, 'message' => app_lang('record_deleted')));
+                    try {
+                        app_hooks()->do_action("app_hook_data_delete", array(
+                            "id" => $id,
+                            "table" => get_db_prefix() . "projects",
+                            "table_without_prefix" => "projects",
+                        ));
+                    } catch (\Exception $ex) {
+                        log_message('error', '[ERROR] {exception}', ['exception' => $ex]);
+                    }
+                }
+            );
         } else {
             echo json_encode(array("success" => false, 'message' => app_lang('record_cannot_be_deleted')));
         }
@@ -1305,6 +1309,7 @@ class Projects extends Security_Controller {
         $user_ids = $this->request->getPost('user_id');
 
         $save_ids = array();
+        $notify_user_ids = array();
         $already_exists = false;
 
         if ($user_ids) {
@@ -1318,7 +1323,7 @@ class Projects extends Security_Controller {
                     $save_id = $this->Project_members_model->save_member($data);
                     if ($save_id && $save_id != "exists") {
                         $save_ids[] = $save_id;
-                        log_notification("project_member_added", array("project_id" => $project_id, "to_user_id" => $user_id));
+                        $notify_user_ids[] = $user_id;
                     } else if ($save_id === "exists") {
                         $already_exists = true;
                     }
@@ -1335,7 +1340,15 @@ class Projects extends Security_Controller {
             foreach ($save_ids as $id) {
                 $project_member_row[] = $this->_project_member_row_data($id);
             }
-            echo json_encode(array("success" => true, "data" => $project_member_row, 'id' => $save_id, 'message' => app_lang('record_saved')));
+            //Respond first so the modal spinner can stop; notify after
+            echo_json_response_with_background(
+                array("success" => true, "data" => $project_member_row, 'id' => $save_ids, 'message' => app_lang('record_saved')),
+                function () use ($project_id, $notify_user_ids) {
+                    foreach ($notify_user_ids as $user_id) {
+                        log_notification("project_member_added", array("project_id" => $project_id, "to_user_id" => $user_id));
+                    }
+                }
+            );
         } else {
             echo json_encode(array("success" => false, 'message' => app_lang('error_occurred')));
         }
@@ -1365,11 +1378,16 @@ class Projects extends Security_Controller {
             }
         } else {
             if ($this->Project_members_model->delete($id)) {
+                $notify_project_id = $project_member_info->project_id;
+                $notify_user_id = $project_member_info->user_id;
 
-                $project_member_info = $this->Project_members_model->get_one($id);
-
-                log_notification("project_member_deleted", array("project_id" => $project_member_info->project_id, "to_user_id" => $project_member_info->user_id));
-                echo json_encode(array("success" => true, 'message' => app_lang('record_deleted')));
+                //Respond first so the delete spinner can stop; notify after
+                echo_json_response_with_background(
+                    array("success" => true, 'message' => app_lang('record_deleted')),
+                    function () use ($notify_project_id, $notify_user_id) {
+                        log_notification("project_member_deleted", array("project_id" => $notify_project_id, "to_user_id" => $notify_user_id));
+                    }
+                );
             } else {
                 echo json_encode(array("success" => false, 'message' => app_lang('record_cannot_be_deleted')));
             }
