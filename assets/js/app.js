@@ -524,6 +524,12 @@ var registerAppTableRowDeleteHook = function (tableId, onSuccess, hookType, cont
         this.each(function () {
             if (settings.ajaxSubmit) {
                 validateForm($(this), function (form) {
+                    //Prevent duplicate saves from multiple Save clicks
+                    if ($(form).data("app-form-submitting")) {
+                        return false;
+                    }
+                    $(form).data("app-form-submitting", true);
+
                     settings.onSubmit();
 
 
@@ -603,6 +609,7 @@ var registerAppTableRowDeleteHook = function (tableId, onSuccess, hookType, cont
                             var callbackResult = settings.beforeAjaxSubmit(data, self, options);
 
                             if (callbackResult === false) {
+                                $(form).data("app-form-submitting", false);
                                 unmaskModal();
                                 return false;
                             }
@@ -648,6 +655,7 @@ var registerAppTableRowDeleteHook = function (tableId, onSuccess, hookType, cont
 
                                     appLoader.hide();
                                 } else {
+                                    $(form).data("app-form-submitting", false);
                                     if (settings.onError(result)) {
                                         if (settings.isModal) {
                                             unmaskModal();
@@ -661,8 +669,12 @@ var registerAppTableRowDeleteHook = function (tableId, onSuccess, hookType, cont
                                 }
                             } catch (err) {
                                 //Keep UI usable if onSuccess throws after a successful save
+                                $(form).data("app-form-submitting", false);
                                 if (settings.isModal) {
                                     unmaskModal();
+                                    if (result && result.success) {
+                                        closeAjaxModal(true);
+                                    }
                                 }
                                 appLoader.hide();
                                 if (window.console && console.error) {
@@ -674,6 +686,7 @@ var registerAppTableRowDeleteHook = function (tableId, onSuccess, hookType, cont
                         },
                         error: function () {
                             //prevent infinite Save spinner when response is empty/invalid JSON
+                            $(form).data("app-form-submitting", false);
                             if (settings.isModal) {
                                 unmaskModal();
                             }
@@ -4621,7 +4634,10 @@ var $appFilterXhrRequest = 'new';
             //     table.page(table.page()).draw('page');
             // }, false);
 
-            var alertId = appAlert.warning(result.message, { duration: 20000 });
+            //delete-confirmation sets undo=0; show success instead of undo-style warning
+            var alertId = (undo === "0")
+                ? appAlert.success(result.message, { duration: 10000 })
+                : appAlert.warning(result.message, { duration: 20000 });
 
             //fire success callback
             settings.onDeleteSuccess(result);
@@ -6517,6 +6533,13 @@ showHideAppTableColumn = function (tableInstance, columnIndex, visible) {
                     } else {
                         appAlert.error(result.message);
                     }
+
+                    appLoader.hide();
+                },
+                error: function () {
+                    $(".app-popover").remove();
+                    appLoader.hide();
+                    appAlert.error(AppLanugage.somethingWentWrong || "Error occurred");
                 }
             });
         }

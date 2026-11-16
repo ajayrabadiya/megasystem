@@ -2887,9 +2887,15 @@ class Tasks extends Security_Controller {
 
         if ($save_id) {
             $task_info = $this->Tasks_model->get_details(array("id" => $id))->getRow();
-            echo json_encode(array("success" => true, "data" => (($this->request->getPost("type") == "sub_task") ? $this->_make_sub_task_row($task_info, "data") : $this->_row_data($save_id)), 'id' => $save_id, "message" => app_lang('record_saved')));
+            $response_data = (($this->request->getPost("type") == "sub_task") ? $this->_make_sub_task_row($task_info, "data") : $this->_row_data($save_id));
+            $notification_activity_log_id = get_array_value($data, "activity_log_id");
 
-            $this->_send_task_updated_notification($task_info,  get_array_value($data, "activity_log_id"));
+            echo_json_response_with_background(
+                array("success" => true, "data" => $response_data, 'id' => $save_id, "message" => app_lang('record_saved')),
+                function () use ($task_info, $notification_activity_log_id) {
+                    $this->_send_task_updated_notification($task_info, $notification_activity_log_id);
+                }
+            );
         } else {
             echo json_encode(array("success" => false, app_lang('error_occurred')));
         }
@@ -3048,9 +3054,15 @@ class Tasks extends Security_Controller {
             $success_array["time"] = $time;
         }
 
-        echo json_encode($success_array);
-
-        $this->_send_task_updated_notification($task_info, get_array_value($data, "activity_log_id"));
+        //Respond first so inline collaborator/priority/date edits can update UI immediately
+        $notification_task_info = $task_info;
+        $notification_activity_log_id = get_array_value($data, "activity_log_id");
+        echo_json_response_with_background(
+            $success_array,
+            function () use ($notification_task_info, $notification_activity_log_id) {
+                $this->_send_task_updated_notification($notification_task_info, $notification_activity_log_id);
+            }
+        );
     }
 
     /* upadate a task status */

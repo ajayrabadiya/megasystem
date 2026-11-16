@@ -526,13 +526,27 @@
             closeModalOnSuccess: false,
             onSuccess: function(result) {
 
-                $("#task-table").appTable({
-                    newData: result.data,
-                    dataId: result.id
-                });
-                $("#reload-kanban-button:visible").trigger("click");
+                try {
+                    if ($("#task-table").length && result.data) {
+                        $("#task-table").appTable({
+                            newData: result.data,
+                            dataId: result.id
+                        });
+                    }
+                    $("#reload-kanban-button:visible").trigger("click");
 
-                $("#save_and_show_value").append(result.save_and_show_link);
+                    if (result.save_and_show_link) {
+                        $("#save_and_show_value").append(result.save_and_show_link);
+                    }
+                } catch (err) {
+                    if (window.console && console.error) {
+                        console.error(err);
+                    }
+                }
+
+                if (result.message) {
+                    appAlert.success(result.message, { duration: 10000 });
+                }
 
                 if (window.showAddNewModal) {
                     var $taskViewLink = $("#link-of-new-view").find("a");
@@ -557,7 +571,10 @@
 
                     if (window.refreshAfterAddTask) {
                         window.refreshAfterAddTask = false;
-                        location.reload();
+                        //Delay reload until modal close animation finishes and XHR is done
+                        setTimeout(function() {
+                            location.reload();
+                        }, 1100);
                     }
                 }
 

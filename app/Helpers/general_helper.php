@@ -1080,7 +1080,14 @@ if (!function_exists('get_team_members_and_teams_select2_data_list')) {
 if (!function_exists('echo_json_response')) {
 
     function echo_json_response($data) {
-        $json = json_encode($data);
+        $json_flags = 0;
+        if (defined('JSON_INVALID_UTF8_SUBSTITUTE')) {
+            $json_flags |= JSON_INVALID_UTF8_SUBSTITUTE;
+        }
+        $json = json_encode($data, $json_flags);
+        if ($json === false) {
+            $json = json_encode(array("success" => false, "message" => "Invalid response encoding"));
+        }
 
         if (session_status() === PHP_SESSION_ACTIVE) {
             session_write_close();
@@ -1118,6 +1125,7 @@ if (!function_exists('echo_json_response')) {
  * Always uses Content-Length so the browser can finish the XHR on WAMP/mod_php
  * even if background work continues in the same PHP process.
  * Background work (notifications) must be non-blocking — see log_notification().
+ * Exits after background work so CodeIgniter cannot append output or hold the connection.
  */
 if (!function_exists('echo_json_response_with_background')) {
 
@@ -1125,15 +1133,16 @@ if (!function_exists('echo_json_response_with_background')) {
         //Respond first so Save/Delete/modal UI never waits on emails or hooks
         echo_json_response($data);
 
-        if (!is_callable($after_response)) {
-            return;
+        if (is_callable($after_response)) {
+            try {
+                $after_response();
+            } catch (\Throwable $ex) {
+                log_message('error', '[ERROR] {exception}', ['exception' => $ex]);
+            }
         }
 
-        try {
-            $after_response();
-        } catch (\Throwable $ex) {
-            log_message('error', '[ERROR] {exception}', ['exception' => $ex]);
-        }
+        //Stop framework shutdown output so the XHR can complete cleanly on WAMP/mod_php
+        exit;
     }
 }
 
@@ -1155,11 +1164,11 @@ if (!function_exists('dispatch_async_http_post')) {
                 $curl = 'curl.exe';
             }
 
-            //max-time 2: deliver POST then disconnect; processor keeps running
-            $cmd = 'start /B "" ' . escapeshellarg($curl)
-                . ' --silent --max-time 2 -X POST ' . escapeshellarg($url)
+            //Fire-and-forget via cmd start /B so Save/Delete never waits on notifications
+            $cmd = 'cmd /c start /B "" ' . escapeshellarg($curl)
+                . ' --silent --connect-timeout 1 --max-time 2 -X POST ' . escapeshellarg($url)
                 . ' --data ' . escapeshellarg($post_body);
-            pclose(popen($cmd, 'r'));
+            @pclose(@popen($cmd, 'r'));
             return true;
         }
 
@@ -1178,8 +1187,6 @@ if (!function_exists('dispatch_async_http_post')) {
 if (!function_exists('log_notification')) {
 
     function log_notification($event, $options = array(), $user_id = 0) {
-        $ci = new Security_Controller(false);
-
         $payload = array(
             "event" => encode_id($event, "notification")
         );
@@ -1188,8 +1195,22 @@ if (!function_exists('log_notification')) {
             $payload["user_id"] = $user_id;
         } else if ($user_id === "0") {
             $payload["user_id"] = $user_id; //system bot
-        } else if (isset($ci->login_user->id)) {
-            $payload["user_id"] = $ci->login_user->id;
+        } else {
+            //Reuse current request user when available; avoid new Security_Controller (blocks WAMP workers)
+            try {
+                $session_user_id = 0;
+                if (isset($_SESSION["user_id"])) {
+                    $session_user_id = $_SESSION["user_id"];
+                } else {
+                    $session = \Config\Services::session();
+                    $session_user_id = $session->get("user_id");
+                }
+                if ($session_user_id) {
+                    $payload["user_id"] = $session_user_id;
+                }
+            } catch (\Throwable $ex) {
+                //notification can proceed without user_id
+            }
         }
 
         foreach ($options as $key => $value) {

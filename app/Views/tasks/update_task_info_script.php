@@ -110,16 +110,18 @@ foreach ($points_dropdown as $key => $value) {
                             }, 50);
                         }
 
-                        if (type === "collaborators" && response.collaborators) {
+                        if (type === "collaborators" && typeof response.collaborators !== "undefined") {
                             setTimeout(function () {
                                 $instance.html(response.collaborators);
                             }, 50);
                         }
 
-                        if ((type === "start_date" || type === "deadline") && response.date) {
+                        if ((type === "start_date" || type === "deadline") && typeof response.date !== "undefined") {
                             setTimeout(function () {
                                 $instance.html(response.date);
-                                $instance.append(response.time);
+                                if (response.time) {
+                                    $instance.append(response.time);
+                                }
 
                                 if (type === "deadline") {
                                     $(".task-deadline-milestone-tooltip").remove();
@@ -127,13 +129,12 @@ foreach ($points_dropdown as $key => $value) {
                             }, 50);
                         }
 
-                        if (type === "priority_id" && response.priority_pill) {
+                        if (type === "priority_id") {
                             setTimeout(function () {
-                               
                                 if (response.priority_id === "0") {
                                     $instance.html("<span class='text-off'><?php echo app_lang("add") . " " . app_lang("priority"); ?><span>");
-                                }else{
-                                    $instance.prepend(response.priority_pill);
+                                } else if (response.priority_pill) {
+                                    $instance.html(response.priority_pill);
                                     feather.replace();
                                 }
                             }, 50);
@@ -145,7 +146,9 @@ foreach ($points_dropdown as $key => $value) {
                             }, 50);
                         }
 
-                        $("#task-table").appTable({newData: response.data, dataId: response.id});
+                        if ($("#task-table").length && response.data) {
+                            $("#task-table").appTable({newData: response.data, dataId: response.id});
+                        }
 
                         appLoader.hide();
 
@@ -155,6 +158,8 @@ foreach ($points_dropdown as $key => $value) {
                         if (typeof window.reloadGantt === "function") {
                             window.reloadGantt(true);
                         }
+                    } else {
+                        appLoader.hide();
                     }
                 }
             });

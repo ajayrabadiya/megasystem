@@ -201,15 +201,32 @@
         window.projectForm = $("#project-form").appForm({
             closeModalOnSuccess: false,
             onSuccess: function(result) {
-                if (typeof RELOAD_PROJECT_VIEW_AFTER_UPDATE !== "undefined" && RELOAD_PROJECT_VIEW_AFTER_UPDATE) {
-                    location.reload();
+                try {
+                    if ($("#project-table").length && result.data) {
+                        $("#project-table").appTable({
+                            newData: result.data,
+                            dataId: result.id
+                        });
+                    }
+                } catch (err) {
+                    if (window.console && console.error) {
+                        console.error(err);
+                    }
+                }
 
+                if (result.message) {
+                    appAlert.success(result.message, { duration: 10000 });
+                }
+
+                if (typeof RELOAD_PROJECT_VIEW_AFTER_UPDATE !== "undefined" && RELOAD_PROJECT_VIEW_AFTER_UPDATE) {
                     window.projectForm.closeModal();
+                    setTimeout(function() {
+                        location.reload();
+                    }, 500);
                 } else if (typeof RELOAD_VIEW_AFTER_UPDATE !== "undefined" && RELOAD_VIEW_AFTER_UPDATE) {
                     RELOAD_VIEW_AFTER_UPDATE = false;
-                    window.location = "<?php echo site_url('projects/view'); ?>/" + result.id;
-
                     window.projectForm.closeModal();
+                    window.location = "<?php echo site_url('projects/view'); ?>/" + result.id;
                 } else if (window.showAddNewModal) {
                     var $addProjectMemberLink = $("#link-of-add-project-member-modal").find("a");
 
@@ -219,17 +236,7 @@
                     $addProjectMemberLink.attr("data-post-view_type", "from_project_modal");
 
                     $addProjectMemberLink.trigger("click");
-
-                    $("#project-table").appTable({
-                        newData: result.data,
-                        dataId: result.id
-                    });
                 } else {
-                    $("#project-table").appTable({
-                        newData: result.data,
-                        dataId: result.id
-                    });
-
                     window.projectForm.closeModal();
                 }
             }

@@ -454,24 +454,26 @@ $task_link = anchor(get_uri("tasks/view/$model_info->id"), '<i data-feather="ext
             },
             success: function(result) {
                 if (result.success) {
-                    if (view_type === "details") {
-                        appAlert.warning(result.message, {
-                            duration: 10000
-                        });
+                    appAlert.success(result.message, {
+                        duration: 10000
+                    });
 
+                    if (view_type === "details") {
                         window.location.href = "<?php echo get_uri("tasks/all_tasks"); ?>";
                     } else if (view_type === "sub_task") {
-                        location.reload();
+                        $("#task-table").appTable({ reload: true });
+                        $(".close-modal").trigger("click");
                     } else {
-                        appAlert.warning(result.message, {
-                            duration: 10000
-                        });
-
-                        $(".dataTable:visible").appTable({
-                            reload: true
-                        });
+                        if ($(".dataTable:visible").length) {
+                            $(".dataTable:visible").appTable({
+                                reload: true
+                            });
+                        } else if ($("#task-table").length) {
+                            $("#task-table").appTable({ reload: true });
+                        }
 
                         $("#reload-kanban-button:visible").trigger("click");
+                        $(".close-modal").trigger("click");
                     }
                 } else {
                     appAlert.error(result.message);
